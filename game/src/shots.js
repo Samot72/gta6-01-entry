@@ -12,6 +12,7 @@ import { SCREEN_TITLE, SCREEN_PLAY } from './render.js';
 const SAMPLE = STEP;
 
 function updateCamera(G) {
+  G.renderer.resize();
   const vw = G.renderer.canvas.width; const vh = G.renderer.canvas.height;
   G.cam.x = clamp(G.player.x - vw / 2, 0, WORLD_W - vw);
   G.cam.y = clamp(G.player.y - vh / 2, 0, WORLD_H - vh);
@@ -56,6 +57,8 @@ function driveStraight(G, dt, speed) {
   car.speed = speed;
   car.x += Math.cos(car.angle) * car.speed * dt;
   car.y += Math.sin(car.angle) * car.speed * dt;
+  car.x = clamp(car.x, 80, WORLD_W - 80);
+  car.y = clamp(car.y, 80, WORLD_H - 80);
   G.player.x = car.x; G.player.y = car.y;
 }
 
@@ -83,7 +86,7 @@ export function stageShot(name, G) {
     G.player.onFoot = true; G.player.inCar = null;
     G.player.angle = -Math.PI / 2;
     G.wanted = 0;
-    for (let i = 0; i < 6 / SAMPLE; i += 1) {
+    for (let i = 0; i < 3 / SAMPLE; i += 1) {
       G.player.y -= 150 * SAMPLE;
       G.player.walkPhase += SAMPLE * 9;
       stepAmbient(G, SAMPLE);
@@ -96,10 +99,10 @@ export function stageShot(name, G) {
     // Mission 2 getaway: Solaris GT stolen, wanted 3, hideout marker ahead.
     G.mission.index = 1; G.mission.stage = 1;
     G.wanted = 3;
-    const car = putPlayerInCar(G, 1900, 1150, 0, 340, 'sport');
+    const car = putPlayerInCar(G, 900, 1150, 0, 340, 'sport');
     car.solaris = true;
     addChasers(G, car);
-    for (let i = 0; i < 5 / SAMPLE; i += 1) {
+    for (let i = 0; i < 3 / SAMPLE; i += 1) {
       driveStraight(G, SAMPLE, 340);
       stepAmbient(G, SAMPLE);
     }
@@ -110,9 +113,9 @@ export function stageShot(name, G) {
   // Cover (default): high-speed chase, wanted 3, two cruisers behind,
   // HUD + minimap + objective all live.
   G.wanted = 3;
-  const car = putPlayerInCar(G, 1350, 1150, 0, 360, 'coupe');
+  const car = putPlayerInCar(G, 500, 1150, 0, 360, 'coupe');
   addChasers(G, car);
-  for (let i = 0; i < 6 / SAMPLE; i += 1) {
+  for (let i = 0; i < 3 / SAMPLE; i += 1) {
     driveStraight(G, SAMPLE, 360);
     stepAmbient(G, SAMPLE);
   }

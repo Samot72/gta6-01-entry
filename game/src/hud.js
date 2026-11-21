@@ -80,19 +80,19 @@ export function drawHUD(G) {
     const car = p.inCar;
     const kmh = Math.round(Math.abs(car.speed) * 0.55);
     ctx.fillStyle = COLORS.hudBg;
-    roundRect(ctx, vw - 150, vh - 96, 138, 76, 8);
+    roundRect(ctx, vw - 150, vh - 124, 138, 76, 8);
     ctx.fill();
     ctx.fillStyle = '#fff';
     ctx.font = 'bold 30px sans-serif';
     ctx.textAlign = 'right';
-    ctx.fillText(`${kmh}`, vw - 46, vh - 52);
+    ctx.fillText(`${kmh}`, vw - 46, vh - 80);
     ctx.font = '13px sans-serif';
     ctx.fillStyle = '#c9c4b4';
-    ctx.fillText('km/h', vw - 24, vh - 52);
+    ctx.fillText('km/h', vw - 24, vh - 80);
     ctx.textAlign = 'left';
     ctx.fillStyle = '#ffb400';
     ctx.font = '13px sans-serif';
-    ctx.fillText(car.solaris ? 'SOLARIS GT' : 'MOBIL', vw - 138, vh - 30);
+    ctx.fillText(car.solaris ? 'SOLARIS GT' : 'MOBIL', vw - 138, vh - 58);
   }
   // Banner (mission events).
   if (G.banner && G.banner.t > 0) {

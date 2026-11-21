@@ -143,6 +143,7 @@ function stepWorld(dt, actions) {
 }
 
 function runShot(name) {
+  G.renderer.resize(); // canvas must be viewport-sized BEFORE staging, or the camera is wrong
   stageShot(name, G);
   let painted = 0;
   function paint() {
