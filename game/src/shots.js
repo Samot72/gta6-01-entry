@@ -1,79 +1,121 @@
-// The screenshot scenes behind ?shot=start|play|end. Each one plays the real rules forward from a
-// fresh world for a fixed number of steps, steered by a simple autopilot (look ahead each way the
-// paddle could move, keep clear of blocks, chase the lowest coin when that is safe), so the frame
-// is what a short game really looks like and the same seed always gives the same frame.
-import { FIELD, PLAYER, STEP } from './config.js';
-import { EVENT_OVER, KIND_BLOCK } from './world.js';
-import { SCREEN_OVER, SCREEN_PLAY, SCREEN_TITLE } from './render.js';
+// SOLMAR HEAT — shots: the four ?shot= scenes. Each one stages a real game
+// state (player, cars, cops, mission) and plays the real systems forward
+// (traffic, pedestrians, police chase) for a fixed number of steps from a
+// fixed seed, so the frame is what a short game really looks like.
+import { STEP, WORLD_W, WORLD_H, clamp } from './config.js';
+import { updateTraffic, updatePeds } from './traffic.js';
+import { updatePolice } from './police.js';
+import { updateBullets } from './combat.js';
+import { makeCar } from './traffic.js';
+import { SCREEN_TITLE, SCREEN_PLAY } from './render.js';
 
-const START_SECONDS = 5;
-const PLAY_SECONDS = 26;
-const END_LIMIT_SECONDS = 600;
-/**
- * How far ahead, in seconds, the autopilot checks each way it could move: the play scene's pilot
- * looks well ahead and keeps all its lives; the end scene's looks only a moment ahead, so it is
- * caught out once the blocks speed up, as a hurried player is.
- */
-const HORIZON_PLAY = 0.7;
-const HORIZON_END = 0.25;
-const SAMPLE = 1 / 30;
-const DIRECTIONS = [0, -1, 1];
-/** Extra room, each side, it keeps between the paddle and a block. */
-const MARGIN = 10;
+const SAMPLE = STEP;
 
-/** Seconds until moving in `direction` (-1, 0, 1) runs the paddle into a block; Infinity when it never does. */
-function timeToHit(state, direction, horizon) {
-  const player = state.player;
-  for (let t = SAMPLE; t <= horizon; t += SAMPLE) {
-    const x = Math.min(FIELD.width - player.width, Math.max(0, player.x + direction * PLAYER.speed * t));
-    for (let index = 0; index < state.items.length; index += 1) {
-      const item = state.items[index];
-      if (!item.active || item.kind !== KIND_BLOCK) continue;
-      const y = item.y + item.speed * t;
-      if (y + item.height > player.y && y < player.y + player.height && item.x < x + player.width + MARGIN && item.x + item.width > x - MARGIN) return t;
-    }
-  }
-  return Infinity;
+function updateCamera(G) {
+  const vw = G.renderer.canvas.width; const vh = G.renderer.canvas.height;
+  G.cam.x = clamp(G.player.x - vw / 2, 0, WORLD_W - vw);
+  G.cam.y = clamp(G.player.y - vh / 2, 0, WORLD_H - vh);
 }
 
-/** Of the safe ways to move, the one toward the lowest coin (or the centre); else the one that is hit last. */
-function autopilot(state, horizon) {
-  const player = state.player;
-  let coin = null;
-  for (let index = 0; index < state.items.length; index += 1) {
-    const item = state.items[index];
-    if (item.active && item.kind !== KIND_BLOCK && (coin === null || item.y > coin.y)) coin = item;
-  }
-  const target = coin === null ? FIELD.width / 2 : coin.x + coin.width / 2;
-  const centre = player.x + player.width / 2;
-  const wanted = target > centre + 8 ? 1 : target < centre - 8 ? -1 : 0;
-  let best = wanted;
-  let bestTime = timeToHit(state, wanted, horizon);
-  for (let index = 0; index < DIRECTIONS.length && bestTime !== Infinity; index += 1) {
-    const time = timeToHit(state, DIRECTIONS[index], horizon);
-    if (time > bestTime) {
-      bestTime = time;
-      best = DIRECTIONS[index];
-    }
-  }
-  return best;
+function stepAmbient(G, dt) {
+  G.time += dt;
+  updateTraffic(G, dt);
+  updatePeds(G, dt);
+  updatePolice(G, dt);
+  updateBullets(G, dt);
+  if (G.banner) G.banner.t -= dt;
+  updateCamera(G);
 }
 
-/**
- * Set `world` to the named scene (start, play or end; any other name is start) and return the
- * screen to draw over it and the best score to show.
- */
-export function stageShot(name, world) {
-  world.reset();
-  if (name !== 'play' && name !== 'end') {
-    for (let index = 0; index < START_SECONDS / STEP; index += 1) world.step(STEP, 0, true);
-    return { screen: SCREEN_TITLE, best: 0 };
+// Put the player in a car at (x, y) heading `angle`, moving at `speed`.
+function putPlayerInCar(G, x, y, angle, speed, type) {
+  const car = makeCar(x, y, angle, type, { driver: 'player' });
+  car.speed = speed;
+  G.cars.push(car);
+  G.player.inCar = car;
+  G.player.onFoot = false;
+  G.player.x = x; G.player.y = y; G.player.angle = angle;
+  return car;
+}
+
+// Two cop cruisers behind the player car, already in pursuit.
+function addChasers(G, car) {
+  const bx = Math.cos(car.angle); const by = Math.sin(car.angle);
+  for (const back of [130, 230]) {
+    const cop = makeCar(car.x - bx * back, car.y - by * back + (back === 230 ? 26 : -26), car.angle, 'cop', { driver: 'cop' });
+    cop.speed = 330;
+    cop.siren = true;
+    G.cars.push(cop);
   }
-  const limit = name === 'end' ? END_LIMIT_SECONDS : PLAY_SECONDS;
-  const horizon = name === 'end' ? HORIZON_END : HORIZON_PLAY;
-  for (let index = 0; index < limit / STEP; index += 1) {
-    if (world.step(STEP, autopilot(world.state, horizon), false) & EVENT_OVER) break;
+}
+
+// Drive the player's car straight along its road for dt seconds.
+function driveStraight(G, dt, speed) {
+  const car = G.player.inCar;
+  if (!car) return;
+  car.speed = speed;
+  car.x += Math.cos(car.angle) * car.speed * dt;
+  car.y += Math.sin(car.angle) * car.speed * dt;
+  G.player.x = car.x; G.player.y = car.y;
+}
+
+export function stageShot(name, G) {
+  // Fresh world, fixed seed, mission 1 live so the HUD shows an objective.
+  G.mission.index = 0; G.mission.stage = 0; G.mission.allDone = false;
+  G.wanted = 0; G.crimeTimer = 0; G.coolTimer = 0;
+  G.player.cash = 1250;
+  G.player.hp = 100;
+  G.screen = SCREEN_PLAY;
+
+  if (name === 'start') {
+    // Title screen over the living city: traffic and pedestrians move.
+    G.player.x = 1350; G.player.y = 1150;
+    G.player.onFoot = true; G.player.inCar = null;
+    for (let i = 0; i < 5 / SAMPLE; i += 1) stepAmbient(G, SAMPLE);
+    G.screen = SCREEN_TITLE;
+    updateCamera(G);
+    return { screen: SCREEN_TITLE };
   }
-  const over = world.state.lives === 0;
-  return { screen: over ? SCREEN_OVER : SCREEN_PLAY, best: world.state.score };
+
+  if (name === 'onfoot') {
+    // On foot downtown: player walking, pedestrians and traffic around.
+    G.player.x = 1350; G.player.y = 1150;
+    G.player.onFoot = true; G.player.inCar = null;
+    G.player.angle = -Math.PI / 2;
+    G.wanted = 0;
+    for (let i = 0; i < 6 / SAMPLE; i += 1) {
+      G.player.y -= 150 * SAMPLE;
+      G.player.walkPhase += SAMPLE * 9;
+      stepAmbient(G, SAMPLE);
+    }
+    updateCamera(G);
+    return { screen: SCREEN_PLAY };
+  }
+
+  if (name === 'mission') {
+    // Mission 2 getaway: Solaris GT stolen, wanted 3, hideout marker ahead.
+    G.mission.index = 1; G.mission.stage = 1;
+    G.wanted = 3;
+    const car = putPlayerInCar(G, 1900, 1150, 0, 340, 'sport');
+    car.solaris = true;
+    addChasers(G, car);
+    for (let i = 0; i < 5 / SAMPLE; i += 1) {
+      driveStraight(G, SAMPLE, 340);
+      stepAmbient(G, SAMPLE);
+    }
+    updateCamera(G);
+    return { screen: SCREEN_PLAY };
+  }
+
+  // Cover (default): high-speed chase, wanted 3, two cruisers behind,
+  // HUD + minimap + objective all live.
+  G.wanted = 3;
+  const car = putPlayerInCar(G, 1350, 1150, 0, 360, 'coupe');
+  addChasers(G, car);
+  for (let i = 0; i < 6 / SAMPLE; i += 1) {
+    driveStraight(G, SAMPLE, 360);
+    stepAmbient(G, SAMPLE);
+  }
+  updateCamera(G);
+  return { screen: SCREEN_PLAY };
 }
